@@ -77,44 +77,60 @@ async function start() {
   }
 }
 
+async function handleInput(input) {
+  if (input.toLowerCase() === 'exit') {
+    console.log('👋 Bye!');
+    rl.close();
+    process.exit(0);
+  }
+  
+  if (!input.trim()) {
+    return;
+  }
+  
+  try {
+    // 3. Message
+    const res = await fetch(`${TARGET_URL}/agent/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: SESSION_ID,
+        capability: 'chat',
+        payload: { message: input }
+      })
+    });
+    
+    const data = await res.json();
+    if (data.error) {
+      console.log(`❌ Error: ${data.error}`);
+    } else {
+      console.log(`${AGENT_NAME} > ${data.response.reply}`);
+    }
+    
+  } catch (error) {
+    console.error(`❌ Network Error: ${error.message}`);
+  }
+  
+  console.log(''); // Empty line
+}
+
 function prompt() {
-  rl.question('You > ', async (input) => {
-    if (input.toLowerCase() === 'exit') {
-      console.log('👋 Bye!');
-      process.exit(0);
-    }
-    
-    if (!input.trim()) {
+  rl.question('You > ', (input) => {
+    handleInput(input).finally(() => {
       prompt();
-      return;
-    }
-    
-    try {
-      // 3. Message
-      const res = await fetch(`${TARGET_URL}/agent/message`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session_id: SESSION_ID,
-          capability: 'chat',
-          payload: { message: input }
-        })
-      });
-      
-      const data = await res.json();
-      if (data.error) {
-        console.log(`❌ Error: ${data.error}`);
-      } else {
-        console.log(`${AGENT_NAME} > ${data.response.reply}`);
-      }
-      
-    } catch (error) {
-      console.error(`❌ Network Error: ${error.message}`);
-    }
-    
-    console.log(''); // Empty line
-    prompt();
+    });
   });
 }
+
+// Prevent readline from closing on Ctrl+C without cleanup
+rl.on('close', () => {
+  console.log('\n👋 Bye!');
+  process.exit(0);
+});
+
+// Handle SIGINT gracefully
+process.on('SIGINT', () => {
+  rl.close();
+});
 
 start();
