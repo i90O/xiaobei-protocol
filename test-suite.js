@@ -6,7 +6,7 @@ const PORT = 3402; // Use a different port to avoid conflicts
 const BASE_URL = `http://localhost:${PORT}`;
 
 // Utils
-function request(method, path, body = null) {
+function request(method, path, body = null, headers = {}) {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: 'localhost',
@@ -15,6 +15,7 @@ function request(method, path, body = null) {
       method: method,
       headers: {
         'Content-Type': 'application/json',
+        ...headers
       },
     };
 
@@ -143,16 +144,83 @@ async function runTests() {
     });
     const fullSessionId = fullSessionRes.body.session_id;
 
-    const translateMsg = await request('POST', '/agent/message', {
+    // 4.2.1 Translate WITHOUT payment - should return 402
+    console.log('\n🧪 Testing x402 Payment Required (402)...');
+    const translateNoPayment = await request('POST', '/agent/message', {
       session_id: fullSessionId,
       capability: 'translate',
       payload: { text: 'Hello', from: 'en', to: 'es' }
     });
-    assert.strictEqual(translateMsg.status, 200, 'Translate message status should be 200');
-    assert.ok(translateMsg.body.response.translated, 'Should have translated text');
-    console.log('✅ Translate message passed.');
+    assert.strictEqual(translateNoPayment.status, 402, 'Translate without payment should return 402');
+    assert.strictEqual(translateNoPayment.body.error, 'Payment Required', 'Should have Payment Required error');
+    assert.ok(translateNoPayment.body.paymentRequired, 'Should have paymentRequired object');
+    assert.strictEqual(translateNoPayment.body.paymentRequired.protocol, 'x402', 'Payment protocol should be x402');
+    assert.ok(translateNoPayment.body.paymentRequired.price, 'Should have price in paymentRequired');
+    assert.ok(translateNoPayment.body.paymentRequired.payTo, 'Should have payTo address');
+    console.log('✅ 402 Payment Required response passed.');
 
-    // 4.3 Invalid Session ID
+    // 4.2.2 Translate WITH invalid payment - should return 402
+    const translateInvalidPayment = await request('POST', '/agent/message', {
+      session_id: fullSessionId,
+      capability: 'translate',
+      payload: { text: 'Hello', from: 'en', to: 'es' }
+    }, { 'payment-signature': 'x402_invalid_test_signature' });
+    assert.strictEqual(translateInvalidPayment.status, 402, 'Translate with invalid payment should return 402');
+    assert.strictEqual(translateInvalidPayment.body.error, 'Invalid Payment', 'Should have Invalid Payment error');
+    console.log('✅ Invalid payment rejection passed.');
+
+    // 4.2.3 Translate WITH valid payment - should succeed
+    const translateMsg = await request('POST', '/agent/message', {
+      session_id: fullSessionId,
+      capability: 'translate',
+      payload: { text: 'Hello', from: 'en', to: 'es' }
+    }, { 'payment-signature': 'x402_valid_test_signature_12345' });
+    assert.strictEqual(translateMsg.status, 200, 'Translate with valid payment should return 200');
+    assert.ok(translateMsg.body.response.translated, 'Should have translated text');
+    assert.strictEqual(translateMsg.body.metadata.payment, 'verified', 'Payment should be marked as verified');
+    console.log('✅ Translate with valid payment passed.');
+
+    // 4.3 Code-review without payment - should return 402
+    const codeReviewSessionRes = await request('POST', '/agent/handshake', {
+      from: 'test-suite-code',
+      capabilities_request: ['code-review']
+    });
+    const codeReviewSessionId = codeReviewSessionRes.body.session_id;
+    
+    const codeReviewNoPayment = await request('POST', '/agent/message', {
+      session_id: codeReviewSessionId,
+      capability: 'code-review',
+      payload: { code: 'console.log("test")', language: 'javascript' }
+    });
+    assert.strictEqual(codeReviewNoPayment.status, 402, 'Code-review without payment should return 402');
+    console.log('✅ Code-review 402 check passed.');
+
+    // 4.4 Summarize without payment - should return 402
+    const summarizeSessionRes = await request('POST', '/agent/handshake', {
+      from: 'test-suite-summarize',
+      capabilities_request: ['summarize']
+    });
+    const summarizeSessionId = summarizeSessionRes.body.session_id;
+    
+    const summarizeNoPayment = await request('POST', '/agent/message', {
+      session_id: summarizeSessionId,
+      capability: 'summarize',
+      payload: { text: 'This is a long text that needs summarization.' }
+    });
+    assert.strictEqual(summarizeNoPayment.status, 402, 'Summarize without payment should return 402');
+    console.log('✅ Summarize 402 check passed.');
+
+    // 4.5 Chat should remain FREE (no 402)
+    const chatFreeCheck = await request('POST', '/agent/message', {
+      session_id: sessionId,
+      capability: 'chat',
+      payload: { message: 'This should be free!' }
+    });
+    assert.strictEqual(chatFreeCheck.status, 200, 'Chat should be free (200)');
+    assert.strictEqual(chatFreeCheck.body.metadata.payment, 'free', 'Chat should be marked as free');
+    console.log('✅ Chat remains free (no payment required).');
+
+    // 4.7 Invalid Session ID
     const badSessionMsg = await request('POST', '/agent/message', {
       session_id: 'fake-session-uuid',
       capability: 'chat',
@@ -161,7 +229,7 @@ async function runTests() {
     assert.strictEqual(badSessionMsg.status, 401, 'Invalid session should be 401');
     console.log('✅ Invalid session check passed.');
 
-    // 4.4 Invalid Capability for Session
+    // 4.8 Invalid Capability for Session
     // 'test-suite' session only asked for 'chat'
     const badCapMsg = await request('POST', '/agent/message', {
       session_id: sessionId, 

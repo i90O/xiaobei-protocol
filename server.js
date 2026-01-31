@@ -30,6 +30,92 @@ const AGENT_CONFIG = {
   }
 };
 
+// ===== x402 Payment Configuration =====
+const PAYMENT_CONFIG = {
+  // Placeholder wallet address (replace with real address when ready)
+  payTo: '0x0000000000000000000000000000000000000000',
+  network: 'eip155:84532', // Base Sepolia testnet
+  facilitatorUrl: 'https://facilitator.x402.org'
+};
+
+const PRICING = {
+  translate: {
+    protocol: 'x402',
+    price: '0.001',
+    currency: 'USDC',
+    network: PAYMENT_CONFIG.network,
+    payTo: PAYMENT_CONFIG.payTo
+  },
+  'code-review': {
+    protocol: 'x402',
+    price: '0.01',
+    currency: 'USDC',
+    network: PAYMENT_CONFIG.network,
+    payTo: PAYMENT_CONFIG.payTo
+  },
+  summarize: {
+    protocol: 'x402',
+    price: '0.005',
+    currency: 'USDC',
+    network: PAYMENT_CONFIG.network,
+    payTo: PAYMENT_CONFIG.payTo
+  },
+  chat: {
+    protocol: 'free',
+    price: '0'
+  }
+};
+
+// ===== Mock Payment Verification =====
+// TODO: Replace with real x402 SDK when wallet is connected
+// const { HTTPFacilitatorClient } = require('@x402/core/server');
+
+/**
+ * Mock payment verification - accepts any signature starting with 'x402_valid_'
+ * In production, this will verify against the x402 facilitator
+ */
+async function verifyPayment(signature, requirements) {
+  // Mock verification logic
+  if (!signature) {
+    return { valid: false, reason: 'No signature provided' };
+  }
+  
+  // For testing: signatures starting with 'x402_valid_' are accepted
+  if (signature.startsWith('x402_valid_')) {
+    return { 
+      valid: true, 
+      paymentId: signature,
+      amount: requirements.price,
+      currency: requirements.currency
+    };
+  }
+  
+  // For testing: signatures starting with 'x402_invalid_' are rejected
+  if (signature.startsWith('x402_invalid_')) {
+    return { valid: false, reason: 'Invalid payment signature' };
+  }
+  
+  // Unknown signature format
+  return { valid: false, reason: 'Unrecognized signature format' };
+}
+
+/**
+ * Mock payment settlement
+ */
+async function settlePayment(signature) {
+  // In production, this calls facilitator.settle()
+  console.log(`[x402] Settling payment: ${signature}`);
+  return { settled: true, paymentId: signature };
+}
+
+/**
+ * Check if a capability requires payment
+ */
+function requiresPayment(capability) {
+  const pricing = PRICING[capability];
+  return pricing && pricing.protocol === 'x402';
+}
+
 // 会话存储 (内存中，生产环境需要持久化)
 const sessions = new Map();
 
@@ -97,7 +183,7 @@ app.post('/agent/handshake', (req, res) => {
 });
 
 // ===== Message =====
-app.post('/agent/message', (req, res) => {
+app.post('/agent/message', async (req, res) => {
   const { session_id, capability, payload } = req.body;
   
   // 验证会话
@@ -116,6 +202,52 @@ app.post('/agent/message', (req, res) => {
       error: 'Invalid capability',
       available: session.capabilities
     });
+  }
+  
+  // ===== x402 Payment Check =====
+  if (requiresPayment(capability)) {
+    const pricing = PRICING[capability];
+    const paymentSignature = req.headers['payment-signature'];
+    
+    // No payment provided - return 402 Payment Required
+    if (!paymentSignature) {
+      return res.status(402).json({
+        error: 'Payment Required',
+        message: `The "${capability}" capability requires payment`,
+        paymentRequired: {
+          scheme: 'exact',
+          protocol: 'x402',
+          price: pricing.price,
+          currency: pricing.currency,
+          network: pricing.network,
+          payTo: pricing.payTo,
+          capability: capability
+        },
+        hint: 'Include a valid x402 PAYMENT-SIGNATURE header with your request'
+      });
+    }
+    
+    // Verify the payment signature
+    const verification = await verifyPayment(paymentSignature, pricing);
+    if (!verification.valid) {
+      return res.status(402).json({
+        error: 'Invalid Payment',
+        message: verification.reason || 'Payment verification failed',
+        paymentRequired: {
+          scheme: 'exact',
+          protocol: 'x402',
+          price: pricing.price,
+          currency: pricing.currency,
+          network: pricing.network,
+          payTo: pricing.payTo,
+          capability: capability
+        }
+      });
+    }
+    
+    // Settle the payment (in production, this transfers funds)
+    await settlePayment(paymentSignature);
+    console.log(`[x402] Payment verified for ${capability}: ${paymentSignature}`);
   }
   
   // 更新会话
@@ -148,7 +280,8 @@ app.post('/agent/message', (req, res) => {
     response,
     metadata: {
       message_number: session.messageCount,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      payment: requiresPayment(capability) ? 'verified' : 'free'
     }
   });
 });
