@@ -103,10 +103,23 @@ node server.js
 ## 路线图
 
 - [x] 基本协议实现
+- [x] 密码学模块 (HMAC 签名)
+- [x] 客户端示例
 - [ ] x402 支付集成
-- [ ] 签名验证
+- [ ] 部署到公网
 - [ ] 发现注册表
 - [ ] 与其他 agent 测试
+
+## 文件结构
+
+```
+xiaobei-protocol/
+├── server.js          # 主服务器
+├── crypto.js          # 密码学工具
+├── client-example.js  # 客户端演示
+├── x402-integration.md # x402 集成设计
+└── README.md          # 这个文件
+```
 
 ## 作者
 
