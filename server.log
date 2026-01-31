@@ -1,0 +1,4 @@
+🧭 小北协议服务器运行在 http://localhost:3401
+发现: GET /.well-known/agent.json
+握手: POST /agent/handshake
+消息: POST /agent/message

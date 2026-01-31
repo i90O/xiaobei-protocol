@@ -52,6 +52,11 @@ app.post('/agent/handshake', (req, res) => {
     return res.status(400).json({ error: 'Missing "from" field' });
   }
   
+  // Validate capabilities_request is an array if present
+  if (capabilities_request && !Array.isArray(capabilities_request)) {
+    return res.status(400).json({ error: '"capabilities_request" must be an array of strings' });
+  }
+
   // 检查请求的能力是否可用
   const requested = capabilities_request || AGENT_CONFIG.capabilities;
   const available = requested.filter(cap => AGENT_CONFIG.capabilities.includes(cap));

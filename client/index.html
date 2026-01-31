@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>小北协议 Web Client 🧭</title>
+    <style>
+        :root {
+            --bg: #0a0a0a;
+            --sidebar: #111;
+            --text: #e0e0e0;
+            --accent: #4ecdc4;
+            --user-msg: #2a2a2a;
+            --agent-msg: #1a1a1a;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            display: flex;
+            height: 100vh;
+        }
+        
+        /* Sidebar */
+        .sidebar {
+            width: 260px;
+            background: var(--sidebar);
+            padding: 1.5rem;
+            border-right: 1px solid #222;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .brand {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .status {
+            font-size: 0.85rem;
+            color: #888;
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            background: #666;
+            border-radius: 50%;
+        }
+        .status-dot.connected { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+        
+        .config {
+            margin-top: auto;
+            border-top: 1px solid #222;
+            padding-top: 1rem;
+        }
+        
+        input {
+            background: #222;
+            border: 1px solid #333;
+            color: var(--text);
+            padding: 0.5rem;
+            border-radius: 4px;
+            width: 100%;
+            margin-bottom: 0.5rem;
+        }
+        
+        button {
+            background: var(--accent);
+            color: #000;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+            width: 100%;
+        }
+        
+        button:hover { opacity: 0.9; }
+        
+        /* Chat Area */
+        .chat-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg);
+        }
+        
+        .header {
+            padding: 1rem 2rem;
+            border-bottom: 1px solid #222;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .agent-info h2 { font-size: 1rem; font-weight: 500; }
+        .agent-info p { font-size: 0.8rem; color: #888; }
+        
+        .messages {
+            flex: 1;
+            padding: 2rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        
+        .message {
+            max-width: 80%;
+            padding: 1rem;
+            border-radius: 8px;
+            line-height: 1.5;
+        }
+        
+        .message.user {
+            align-self: flex-end;
+            background: var(--user-msg);
+            border-bottom-right-radius: 2px;
+        }
+        
+        .message.agent {
+            align-self: flex-start;
+            background: var(--agent-msg);
+            border: 1px solid #222;
+            border-bottom-left-radius: 2px;
+        }
+        
+        .message .meta {
+            font-size: 0.75rem;
+            color: #666;
+            margin-bottom: 0.5rem;
+        }
+        
+        .input-area {
+            padding: 1.5rem 2rem;
+            border-top: 1px solid #222;
+            display: flex;
+            gap: 1rem;
+        }
+        
+        .input-area input { margin-bottom: 0; }
+        .input-area button { width: auto; }
+        
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="brand">🧭 小北协议</div>
+        
+        <div class="status">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">Disconnected</span>
+        </div>
+        
+        <div id="capabilities" style="margin-top: 1rem; font-size: 0.85rem; color: #aaa;">
+            <!-- Capabilities listed here -->
+        </div>
+        
+        <div class="config">
+            <input type="text" id="agentUrl" value="http://localhost:3401" placeholder="Agent URL">
+            <button onclick="connect()">Connect</button>
+        </div>
+    </div>
+    
+    <div class="chat-area">
+        <div class="header">
+            <div class="agent-info">
+                <h2 id="agentName">No Agent Selected</h2>
+                <p id="agentDesc">Connect to an agent to start chatting</p>
+            </div>
+        </div>
+        
+        <div class="messages" id="messages">
+            <!-- Messages go here -->
+            <div class="message agent">
+                <div class="meta">System</div>
+                Welcome to Xiaobei Protocol Client v0.1.0. Enter an agent URL and click Connect.
+            </div>
+        </div>
+        
+        <div class="input-area">
+            <input type="text" id="chatInput" placeholder="Type a message..." onkeypress="handleKey(event)">
+            <button onclick="sendMessage()">Send</button>
+        </div>
+    </div>
+
+    <script>
+        let sessionId = null;
+        let currentUrl = '';
+        
+        async function connect() {
+            const urlInput = document.getElementById('agentUrl');
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+            const btn = document.querySelector('.config button');
+            
+            currentUrl = urlInput.value.replace(/\/$/, '');
+            btn.disabled = true;
+            statusText.innerText = 'Connecting...';
+            
+            try {
+                // 1. Discovery
+                const discRes = await fetch(`${currentUrl}/.well-known/agent.json`);
+                if (!discRes.ok) throw new Error('Discovery failed');
+                const info = await discRes.json();
+                
+                document.getElementById('agentName').innerText = info.name;
+                document.getElementById('agentDesc').innerText = info.description;
+                
+                // Show capabilities
+                const capDiv = document.getElementById('capabilities');
+                capDiv.innerHTML = '<strong>Capabilities:</strong><br>' + 
+                    info.capabilities.map(c => `• ${c}`).join('<br>');
+                
+                // 2. Handshake
+                const hsRes = await fetch(`${currentUrl}/agent/handshake`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        from: 'web-client-' + Date.now(),
+                        capabilities_request: ['chat', 'translate']
+                    })
+                });
+                const hs = await hsRes.json();
+                
+                if (!hs.accepted) throw new Error(hs.error || 'Handshake rejected');
+                
+                sessionId = hs.session_id;
+                statusDot.classList.add('connected');
+                statusText.innerText = 'Connected';
+                addMessage('System', `Connected to ${info.name}. Session: ${sessionId.substring(0,8)}...`);
+                
+            } catch (e) {
+                console.error(e);
+                statusText.innerText = 'Error';
+                addMessage('System', `Connection error: ${e.message}`);
+                statusDot.classList.remove('connected');
+            } finally {
+                btn.disabled = false;
+            }
+        }
+        
+        async function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const text = input.value.trim();
+            if (!text || !sessionId) return;
+            
+            addMessage('You', text, true);
+            input.value = '';
+            
+            try {
+                // Determine capability (simple heuristic)
+                let capability = 'chat';
+                let payload = { message: text };
+                
+                // Demo: if text starts with "trans:", use translate
+                if (text.startsWith('trans:')) {
+                    capability = 'translate';
+                    payload = { text: text.substring(6).trim(), to: 'zh' };
+                }
+                
+                const res = await fetch(`${currentUrl}/agent/message`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        session_id: sessionId,
+                        capability: capability,
+                        payload: payload
+                    })
+                });
+                
+                const data = await res.json();
+                
+                if (data.error) {
+                    addMessage('Error', data.error);
+                } else {
+                    let reply = '';
+                    if (data.capability === 'translate') {
+                        reply = data.response.translated;
+                    } else {
+                        reply = data.response.reply;
+                    }
+                    addMessage(document.getElementById('agentName').innerText, reply);
+                }
+                
+            } catch (e) {
+                addMessage('System', `Network error: ${e.message}`);
+            }
+        }
+        
+        function addMessage(sender, text, isUser = false) {
+            const div = document.createElement('div');
+            div.className = `message ${isUser ? 'user' : 'agent'}`;
+            div.innerHTML = `<div class="meta">${sender}</div>${text}`;
+            document.getElementById('messages').appendChild(div);
+            // Scroll to bottom
+            const container = document.getElementById('messages');
+            container.scrollTop = container.scrollHeight;
+        }
+        
+        function handleKey(e) {
+            if (e.key === 'Enter') sendMessage();
+        }
+    </script>
+</body>
+</html>
